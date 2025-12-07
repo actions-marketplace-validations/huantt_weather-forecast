@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"github.com/huantt/weather-forecast/model"
 	"github.com/huantt/weather-forecast/pkg/errs"
@@ -21,25 +22,28 @@ func NewCollector(weatherService WeatherService) *Collector {
 	return &Collector{weatherService}
 }
 
-func (c *Collector) Collect(ctx context.Context, city string, days int, readmeTemplateFile string, outFilePath string) error {
-	slog.Info(fmt.Sprintf("Collecting weather for %s for %d days - Template file: %s", city, days, readmeTemplateFile))
+func (c *Collector) Collect(ctx context.Context, city string, days int, templateFilePath string, outFilePath string) error {
+	slog.Info(fmt.Sprintf("Collecting weather for %s for %d days - Template file: %s", city, days, templateFilePath))
 	weathers, err := c.weatherService.Forecast(ctx, city, days)
 	if err != nil {
 		return errs.Joinf(err, "[weatherService.Forecast]")
 	}
-	readmeTemplate, err := os.ReadFile(readmeTemplateFile)
+	readmeTemplate, err := os.ReadFile(templateFilePath)
 	if err != nil {
-		return errs.Joinf(err, "[os.ReadFile] "+readmeTemplateFile)
+		return errs.Joinf(err, "[os.ReadFile] "+templateFilePath)
 	}
-	readme, err := generateReadme(weathers, string(readmeTemplate), templates...)
+	readme, err := generateOutput(weathers, string(readmeTemplate), templates...)
 	if err != nil {
-		return errs.Joinf(err, "[generateReadme]")
+		return errs.Joinf(err, "[generateOutput]")
 	}
 
 	return os.WriteFile(outFilePath, []byte(*readme), 0644)
 }
 
-func generateReadme(weathers []model.Weather, readmeTemplate string, templates ...string) (*string, error) {
+func generateOutput(weathers []model.Weather, readmeTemplate string, templates ...string) (*string, error) {
+	if len(weathers) == 0 {
+		return nil, errors.New("weathers must be not empty")
+	}
 	tmpl, err := template.
 		New("readme").
 		Funcs(template.FuncMap{
@@ -61,8 +65,9 @@ func generateReadme(weathers []model.Weather, readmeTemplate string, templates .
 
 	var result bytes.Buffer
 	err = tmpl.ExecuteTemplate(&result, "readme", map[string]any{
-		"Weathers":  weathers,
-		"UpdatedAt": time.Now(),
+		"Weathers":     weathers,
+		"UpdatedAt":    time.Now(),
+		"TodayWeather": weathers[0],
 	})
 	if err != nil {
 		return nil, err
